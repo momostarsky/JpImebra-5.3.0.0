@@ -29,6 +29,8 @@
 
 // List of accepted abstract syntaxes
 const std::list<std::string> abstractSyntaxes{
+        //  用于支持CEcho SCP 的传输语法
+        imebra::dicom2018e::uidVerificationSOPClass,
         imebra::dicom2018e::uidStoredPrintStorageSOPClass,
         imebra::dicom2018e::uidHardcopyGrayscaleImageStorageSOPClass,
         imebra::dicom2018e::uidHardcopyColorImageStorageSOPClass,
