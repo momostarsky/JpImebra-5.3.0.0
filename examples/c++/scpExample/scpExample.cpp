@@ -26,7 +26,6 @@
 #include  <unistd.h>
 
 
-
 // List of accepted abstract syntaxes
 const std::list<std::string> abstractSyntaxes{
         //  用于支持CEcho SCP 的传输语法
@@ -343,6 +342,50 @@ void outputCommandTags(const std::string &title, const imebra::DimseCommand &com
 // When the app must terminate then we abort all the active associations.
 static std::set<imebra::AssociationBase *> activeAssociations;
 static std::mutex lockActiveAssociations; // Lock the access to the associations set.
+static imebra::PresentationContexts presentationContexts;
+
+void initTransferSyntax() {
+    for (const std::string &abstractSyntax: abstractSyntaxes) {
+        imebra::PresentationContext context(abstractSyntax);
+        for (const std::string &transferSyntax: transferSyntaxes) {
+            context.addTransferSyntax(transferSyntax);
+        }
+        presentationContexts.addPresentationContext(context);
+    }
+}
+
+imebra::dimseStatusCode_t savePayloadToDisk(imebra::DataSet &payload, std::string &dcmStoreDir) {
+    std::string patientId = payload.getString(imebra::TagId(imebra::tagId_t::PatientID_0010_0020),
+                                              0, "");
+    std::string studyUid = payload.getString(
+            imebra::TagId(imebra::tagId_t::StudyInstanceUID_0020_000D),
+            0, "");
+
+    std::string seriesUid = payload.getString(
+            imebra::TagId(imebra::tagId_t::SeriesInstanceUID_0020_000E),
+            0, "");
+    std::string sopInstUid = payload.getString(
+            imebra::TagId(imebra::tagId_t::SOPInstanceUID_0008_0018), 0, "");
+
+    if (patientId.empty() || studyUid.empty() || seriesUid.empty() || sopInstUid.empty()) {
+        return imebra::dimseStatusCode_t::instanceUIDDoesNotExist;
+
+    }
+    std::ostringstream saveTo;
+    saveTo << dcmStoreDir << patientId << "/" << studyUid << "/" << seriesUid << "/";
+
+    std::stringstream commandText;
+    commandText << "mkdir -p  \"" << saveTo.str() << "\"";
+    std::string command = commandText.str();
+    commandText.clear();
+    std::system(command.c_str());
+    saveTo << sopInstUid << ".dcm";
+    std::string savePath = saveTo.str();
+    saveTo.clear();
+    imebra::CodecFactory::save(payload, savePath, imebra::codecType_t::dicom);
+    std::wcout << L"Save DicomFile To:" << savePath.c_str() << std::endl;
+    return imebra::dimseStatusCode_t::success;
+}
 
 ///
 /// \brief When a DIMSE connection is received then this method is executed in a
@@ -359,16 +402,6 @@ void processDimseCommands(imebra::TCPStream tcpStream, std::string aet, std::str
         // to read and write on the connected socket
         imebra::StreamReader readSCU(tcpStream.getStreamInput());
         imebra::StreamWriter writeSCU(tcpStream.getStreamOutput());
-
-        // Specify which presentation contexts we accept (declared on the top of this file)
-        imebra::PresentationContexts presentationContexts;
-        for (const std::string &abstractSyntax: abstractSyntaxes) {
-            imebra::PresentationContext context(abstractSyntax);
-            for (const std::string &transferSyntax: transferSyntaxes) {
-                context.addTransferSyntax(transferSyntax);
-            }
-            presentationContexts.addPresentationContext(context);
-        }
 
         // The AssociationSCP constructor will negotiate the assocation
         imebra::AssociationSCP scp(aet, 1, 1, presentationContexts, readSCU, writeSCU, 0, 10);
@@ -398,42 +431,8 @@ void processDimseCommands(imebra::TCPStream tcpStream, std::string aet, std::str
 
                         imebra::CStoreCommand cstore = command.getAsCStoreCommand(); // Convert to cstore to retrieve cstore-specific data
                         imebra::DataSet payload = cstore.getPayloadDataSet();
-
-                        std::string patientId = payload.getString(imebra::TagId(imebra::tagId_t::PatientID_0010_0020),
-                                                                  0, "");
-                        std::string studyUid = payload.getString(
-                                imebra::TagId(imebra::tagId_t::StudyInstanceUID_0020_000D),
-                                0, "");
-
-                        std::string seriesUid = payload.getString(
-                                imebra::TagId(imebra::tagId_t::SeriesInstanceUID_0020_000E),
-                                0, "");
-                        std::string sopInstUid = payload.getString(
-                                imebra::TagId(imebra::tagId_t::SOPInstanceUID_0008_0018), 0, "");
-
-                        if (patientId == "" || studyUid == "" || seriesUid == "" || sopInstUid == "") {
-                            dimse.sendCommandOrResponse(
-                                    imebra::CStoreResponse(cstore, imebra::dimseStatusCode_t::instanceUIDDoesNotExist));
-
-                        } else {
-                            std::ostringstream saveTo;
-                            saveTo <<  saveDir <<  patientId << "/" << studyUid << "/" << seriesUid << "/";
-
-                            std::stringstream commandText ;
-                            commandText << "mkdir -p  \"" << saveTo.str() << "\"";
-                            std::string command = commandText.str();
-                            commandText.clear();
-                            std::system(command.c_str());
-                            saveTo << sopInstUid << ".dcm";
-                            std::string savePath = saveTo.str();
-                            saveTo.clear();
-                            imebra::CodecFactory::save(payload, savePath, imebra::codecType_t::dicom);
-                            dimse.sendCommandOrResponse(
-                                    imebra::CStoreResponse(cstore, imebra::dimseStatusCode_t::success));
-                            std::wcout << L"Save DicomFile To:" << savePath.c_str() << std::endl;
-                        }
-
-
+                        imebra::dimseStatusCode_t statusCode = savePayloadToDisk(payload, saveDir);
+                        dimse.sendCommandOrResponse(imebra::CStoreResponse(cstore, statusCode));
                     }
                         break;
                     case imebra::dimseCommandType_t::cGet:
@@ -678,24 +677,26 @@ int main(int argc, char *argv[]) {
             savedDirectory.append("/");
         }
 
-        if(  access( savedDirectory.c_str(), F_OK )  != 0 ) {
+        if (access(savedDirectory.c_str(), F_OK) != 0) {
             //--- 目录不存在
             std::string createDirectory("mkdir -p ");
             createDirectory.append(savedDirectory);
-            std::system( createDirectory.c_str());
+            std::system(createDirectory.c_str());
         }
 
 
-        if(  access( savedDirectory.c_str(), F_OK | R_OK |W_OK )  != 0 ) {
+        if (access(savedDirectory.c_str(), F_OK | R_OK | W_OK) != 0) {
             std::wcout << "DICOM 文件存放目录： " << argv[3] << " 不存在或是无操作权限" << std::endl;
-            return  0;
+            return 0;
         }
         std::string port(argv[1]);
         std::string aet(argv[2]);
 
+        initTransferSyntax();
         // Create a listening socket bound to the port in the first argument
         imebra::TCPPassiveAddress listeningAddress("", port);
         imebra::TCPListener listenForConnections(listeningAddress);
+
         // Listen in a lambda execute in another thread
         std::thread listeningThread(
                 [&]() {
@@ -729,8 +730,10 @@ int main(int argc, char *argv[]) {
 
                 });
 
-        std::wcout << "SCP is listening on port " << argv[1] << " with AET " << argv[2] <<
-                   " And  DicomFile Saved To :" << argv[3] << std::endl;
+        std::wcout << "SCP is listening on port " << port.c_str()
+                   << " with AET " <<  aet.c_str()
+                   << " And  DicomFile Saved To :" << savedDirectory.c_str()
+                   << std::endl;
         std::wcout << "Press ENTER to exit..." << argv[1] << std::endl;
 
 
