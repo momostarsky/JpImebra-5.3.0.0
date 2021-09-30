@@ -215,7 +215,7 @@ target_include_directories(imebra PRIVATE ${imebra_objc_gnustep_dir})
 
 # Define dependency libraries
 #----------------------------
-target_link_libraries(imebra ${imebra_libraries}    -liconv)
+target_link_libraries(imebra ${imebra_libraries}    )
 
 message (STATUS "OBJC INCLUDE:${imebra_objc_include_dir}")
 message (STATUS "GNU INCLUDE:${imebra_objc_gnustep_dir}")
@@ -319,7 +319,7 @@ if(NOT IOS)
     endif()
 
     if(${DCMTK_FOUND})
-        target_link_libraries(ImebraTests dcmdata dcmimage  -liconv)
+        target_link_libraries(ImebraTests dcmdata dcmimage  )
     endif()
 
     ##############################################

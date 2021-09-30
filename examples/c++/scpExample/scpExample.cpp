@@ -344,17 +344,7 @@ static std::set<imebra::AssociationBase *> activeAssociations;
 static std::mutex lockActiveAssociations; // Lock the access to the associations set.
 static imebra::PresentationContexts presentationContexts;
 
-static std::list<imebra::DataSet> payLoadQueue;
-
-
-static pthread_cond_t cond;         //条件变量
-static pthread_mutex_t payMutex;       //互斥锁
-static bool stopProcess(false);
-
 void initDicomProcessor() {
-
-    pthread_cond_init(&cond, NULL);
-    pthread_mutex_init(&payMutex, NULL);
 
     for (const std::string &abstractSyntax: abstractSyntaxes) {
         imebra::PresentationContext context(abstractSyntax);
@@ -365,7 +355,8 @@ void initDicomProcessor() {
     }
 }
 
-imebra::dimseStatusCode_t savePayloadToDisk(imebra::DataSet &payload, std::string &dcmStoreDir) {
+
+void saveToDisk(imebra::DataSet &payload, std::string &dcmStoreDir) {
     std::string patientId = payload.getString(imebra::TagId(imebra::tagId_t::PatientID_0010_0020),
                                               0, "");
     std::string studyUid = payload.getString(
@@ -379,7 +370,7 @@ imebra::dimseStatusCode_t savePayloadToDisk(imebra::DataSet &payload, std::strin
             imebra::TagId(imebra::tagId_t::SOPInstanceUID_0008_0018), 0, "");
 
     if (patientId.empty() || studyUid.empty() || seriesUid.empty() || sopInstUid.empty()) {
-        return imebra::dimseStatusCode_t::instanceUIDDoesNotExist;
+        return  ;
 
     }
     std::ostringstream saveTo;
@@ -395,50 +386,10 @@ imebra::dimseStatusCode_t savePayloadToDisk(imebra::DataSet &payload, std::strin
     saveTo.clear();
     imebra::CodecFactory::save(payload, savePath, imebra::codecType_t::dicom);
     std::wcout << L"Save DicomFile To:" << savePath.c_str() << std::endl;
-    return imebra::dimseStatusCode_t::success;
-}
-
-
-imebra::dimseStatusCode_t savePayloadToCache(imebra::DataSet &payload ) {
-
-    std::string sopInstUid = payload.getString(
-            imebra::TagId(imebra::tagId_t::SOPInstanceUID_0008_0018), 0, "");
-
-    if (sopInstUid.empty()) {
-        return imebra::dimseStatusCode_t::instanceUIDDoesNotExist;
-    }
-    pthread_mutex_lock(&payMutex);
-    payLoadQueue.push_back(payload);
-    pthread_mutex_unlock(&payMutex);
-    pthread_cond_signal(&cond);
-    std::wcout << "save Payload To Queue :" << payLoadQueue.size() << std::endl;
-    return imebra::dimseStatusCode_t::success;
-}
-
-void processPayloadQueue(std::string &dcmStoreDir) {
-    while (1) {
-      //  pthread_mutex_lock(&payMutex);
-//        while (payLoadQueue.empty()) {
-            pthread_cond_wait(&cond, &payMutex);
-//        }
-        imebra::DataSet payload = payLoadQueue.front();
-        payLoadQueue.pop_front();
-//        pthread_mutex_unlock(&payMutex);
-
-        std::ostringstream saveTo;
-        std::string sopInstUid = payload.getString(
-                imebra::TagId(imebra::tagId_t::SOPInstanceUID_0008_0018), 0, "");
-        saveTo << dcmStoreDir << sopInstUid << ".dcm";
-        std::string savePath = saveTo.str();
-        saveTo.clear();
-        imebra::CodecFactory::save(payload, savePath, imebra::codecType_t::dicom);
-        std::wcout << L"Write DicomFile：" << savePath.c_str() << std::endl;
-        if (stopProcess && payLoadQueue.empty()) {
-            break;
-        }
-    }
 
 }
+
+
 
 ///
 /// \brief When a DIMSE connection is received then this method is executed in a
@@ -449,7 +400,10 @@ void processPayloadQueue(std::string &dcmStoreDir) {
 /// \param aet       the SCP aet to communicate during the ACSE negotiation
 ///
 //////////////////////////////////////////////////////////////////////////////////////
-void processDimseCommands(imebra::TCPStream tcpStream, std::string aet ) {
+void processDimseCommands(imebra::TCPStream tcpStream, std::string  aet ,std::string dcmSaveDirectory ) {
+
+    std::list<imebra::DataSet> cPayLoadQueue;
+
     try {
         // tcpStream represents the connected socket. Allocate a stream reader and a writer
         // to read and write on the connected socket
@@ -481,11 +435,10 @@ void processDimseCommands(imebra::TCPStream tcpStream, std::string aet ) {
                         ////////////////////////////
                     {
                         outputCommandTags("**** Received CSTORE command from " + scp.getOtherAET(), command);
-
                         imebra::CStoreCommand cstore = command.getAsCStoreCommand(); // Convert to cstore to retrieve cstore-specific data
                         imebra::DataSet payload = cstore.getPayloadDataSet();
-                        imebra::dimseStatusCode_t statusCode = savePayloadToCache(payload );
-                        dimse.sendCommandOrResponse(imebra::CStoreResponse(cstore, statusCode));
+                        cPayLoadQueue.push_back(payload);
+                        dimse.sendCommandOrResponse(imebra::CStoreResponse(cstore, imebra::dimseStatusCode_t::success));
                     }
                         break;
                     case imebra::dimseCommandType_t::cGet:
@@ -698,11 +651,17 @@ void processDimseCommands(imebra::TCPStream tcpStream, std::string aet ) {
 
     }
     catch (const imebra::StreamEOFError &) {
-        // The association has been closed
+
     }
     catch (const std::exception &e) {
         std::wcout << e.what() << std::endl;
     }
+    while(! cPayLoadQueue.empty()){
+        imebra::DataSet payloadDs = cPayLoadQueue.front();
+        saveToDisk(payloadDs, dcmSaveDirectory);
+        cPayLoadQueue.pop_front();
+    }
+    cPayLoadQueue.clear();
 }
 
 
@@ -750,12 +709,6 @@ int main(int argc, char *argv[]) {
         imebra::TCPPassiveAddress listeningAddress("", port);
         imebra::TCPListener listenForConnections(listeningAddress);
 
-        std::thread saveDicomThread(
-                [&]() {
-                    processPayloadQueue(savedDirectory);
-                });
-
-
         // Listen in a lambda execute in another thread
         std::thread listeningThread(
                 [&]() {
@@ -765,7 +718,7 @@ int main(int argc, char *argv[]) {
                             imebra::TCPStream newTCPStream = listenForConnections.waitForConnection();
 
                             // Launch a thread that processes the dimse commands on the new connection
-                            std::thread dimseCommandsThread(processDimseCommands, newTCPStream, aet);
+                            std::thread dimseCommandsThread(processDimseCommands, newTCPStream, aet , savedDirectory);
 
                             // We detach the thread, so we can forget about it.
                             dimseCommandsThread.detach();
@@ -794,17 +747,10 @@ int main(int argc, char *argv[]) {
                    << " And  DicomFile Saved To :" << savedDirectory.c_str()
                    << std::endl;
         std::wcout << "Press ENTER to exit..." << argv[1] << std::endl;
-
-
         getchar();
-
         // Terminate the listening socket: will cause the listening thread to exit
         listenForConnections.terminate();
         listeningThread.join();
-        saveDicomThread.join();
-        stopProcess = true;
-        pthread_cond_destroy(&cond);
-        pthread_mutex_destroy(&payMutex);
         return 0;
 
     }
