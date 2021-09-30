@@ -17,7 +17,10 @@ if("*${CMAKE_BUILD_TYPE}*" STREQUAL "**")
 endif()
 
 set(imebra_libraries "")
-
+#
+# -- sudo apt-get install libopenjp2-7-dev
+#
+set(JPEG2000  2)
 # Select the proper charset conversion libraries according to the charset conversion method
 #------------------------------------------------------------------------------------------
 if("*${IMEBRA_CHARSET_CONVERSION}*" STREQUAL "*ICONV*")

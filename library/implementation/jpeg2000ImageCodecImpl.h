@@ -27,18 +27,16 @@ If you do not want to be bound by the GPL terms (such as the requirement
 #include <list>
 
 
-namespace imebra
-{
+namespace imebra {
 
-namespace implementation
-{
+    namespace implementation {
 
-namespace codecs
-{
+        namespace codecs {
 
 /// \addtogroup group_codecs
 ///
 /// @{
+            class JPEG2000Internals;
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
@@ -49,49 +47,73 @@ namespace codecs
 ///
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
-class jpeg2000ImageCodec : public imageCodec
-{
-public:
-	// Retrieve the image from a dataset
-	///////////////////////////////////////////////////////////
-    virtual std::shared_ptr<image> getImage(const dataSet& sourceDataSet, std::shared_ptr<streamReader> pStream, tagVR_t dataType) const override;
+            class jpeg2000ImageCodec : public imageCodec {
+            public:
+                jpeg2000ImageCodec();
 
-	// Insert a jpeg compressed image into a dataset
-	///////////////////////////////////////////////////////////
-	virtual void setImage(
-		std::shared_ptr<streamWriter> pDestStream,
-		std::shared_ptr<image> pImage,
-        const std::string& transferSyntax,
-        imageQuality_t imageQuality,
-        tagVR_t dataType,
-        std::uint32_t allocatedBits,
-		bool bSubSampledX,
-		bool bSubSampledY,
-		bool bInterleaved,
-        bool b2Complement) const override;
+                ~jpeg2000ImageCodec();
 
-	// Return true if the codec can handle the transfer
-	///////////////////////////////////////////////////////////
-    virtual bool canHandleTransferSyntax(const std::string& transferSyntax) const override;
+                // Retrieve the image from a dataset
+                ///////////////////////////////////////////////////////////
 
-	// Returns true if the transfer syntax has to be
-	//  encapsulated
-	//
-	///////////////////////////////////////////////////////////
-    virtual bool encapsulated(const std::string& transferSyntax) const override;
+                virtual std::shared_ptr<image> getImage(const std::string &transferSyntax,
+                                                        const std::string &colorSpace,
+                                                        std::uint32_t channelsNumber,
+                                                        std::uint32_t imageWidth,
+                                                        std::uint32_t imageHeight,
+                                                        bool bSubsampledX,
+                                                        bool bSubsampledY,
+                                                        bool bInterleaved,
+                                                        bool b2Complement,
+                                                        std::uint8_t allocatedBits,
+                                                        std::uint8_t storedBits,
+                                                        std::uint8_t highBit,
+                                                        std::shared_ptr<streamReader> pSourceStream) const override;
 
-	// Return the suggested allocated bits
-	///////////////////////////////////////////////////////////
-    virtual std::uint32_t suggestAllocatedBits(const std::string& transferSyntax, std::uint32_t highBit) const override;
+                // Insert a jpeg compressed image into a dataset
+                ///////////////////////////////////////////////////////////
+                virtual void setImage(
+                        std::shared_ptr<streamWriter> pDestStream,
+                        std::shared_ptr<const image> pSourceImage,
+                        const std::string &transferSyntax,
+                        imageQuality_t imageQuality,
+                        std::uint32_t allocatedBits,
+                        bool bSubSampledX,
+                        bool bSubSampledY,
+                        bool bInterleaved,
+                        bool b2Complement) const override;
 
-};
+                // Return true if the codec can handle the transfer
+                ///////////////////////////////////////////////////////////
+                virtual bool canHandleTransferSyntax(const std::string &transferSyntax) const override;
+
+                // Return the default planar configuration
+                ///////////////////////////////////////////////////////////
+                virtual bool defaultInterleaved() const override;
+
+                // Returns true if the transfer syntax has to be
+                //  encapsulated
+                //
+                ///////////////////////////////////////////////////////////
+                virtual bool encapsulated(const std::string &transferSyntax) const override;
+
+                // Return the suggested allocated bits
+                ///////////////////////////////////////////////////////////
+                virtual std::uint32_t
+                suggestAllocatedBits(const std::string &transferSyntax, std::uint32_t highBit) const override;
+
+            private:
+
+
+                JPEG2000Internals *Internals;
+            };
 
 
 /// @}
 
-} // namespace codecs
+        } // namespace codecs
 
-} // namespace implementation
+    } // namespace implementation
 
 } // namespace imebra
 
