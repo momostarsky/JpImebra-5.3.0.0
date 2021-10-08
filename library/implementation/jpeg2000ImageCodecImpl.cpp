@@ -321,8 +321,7 @@ namespace imebra {
                     bool b2Complement) const {
                 IMEBRA_FUNCTION_START() ;
 
-                    IMEBRA_THROW(DataSetUnknownTransferSyntaxError,
-                                 "None of the codecs support the specified transfer syntax");
+
                     const uint32_t highBit = pSourceImage->getHighBit();
                     std::shared_ptr<handlers::readingDataHandlerNumericBase> dataReader = pSourceImage->getReadingDataHandler();
 
