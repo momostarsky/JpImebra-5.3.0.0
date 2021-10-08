@@ -36,11 +36,6 @@ If you do not want to be bound by the GPL terms (such as the requirement
 #include <cstdio>
 #include "jpeg2000Helper.h"
 
-extern "C"
-{
-#include  <openjpeg-2.3/openjpeg.h>
-
-}
 
 namespace imebra {
 
@@ -62,10 +57,6 @@ namespace imebra {
             };
 
 
-
-
-
-
 ////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////
 //
@@ -79,7 +70,8 @@ namespace imebra {
             bool jpeg2000ImageCodec::canHandleTransferSyntax(const std::string &transferSyntax) const {
                 IMEBRA_FUNCTION_START() ;
 
-                    return ( transferSyntax == "1.2.840.10008.1.2.4.90" ||   transferSyntax == "1.2.840.10008.1.2.4.91");
+                    return (transferSyntax == uidJPEG2000ImageCompressionLosslessOnly_1_2_840_10008_1_2_4_90 ||
+                            transferSyntax == uidJPEG2000ImageCompression_1_2_840_10008_1_2_4_91);
 
                 IMEBRA_FUNCTION_END();
             }
@@ -129,13 +121,13 @@ namespace imebra {
 //
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
-            std::uint32_t jpeg2000ImageCodec::suggestAllocatedBits(const std::string &transferSyntax  ,
-                                                                   std::uint32_t   highBit  ) const {
+            std::uint32_t jpeg2000ImageCodec::suggestAllocatedBits(const std::string &transferSyntax,
+                                                                   std::uint32_t highBit) const {
                 IMEBRA_FUNCTION_START() ;
 
 
                     std::uint32_t hb = highBit + 1;
-                    if (canHandleTransferSyntax(transferSyntax) ) {
+                    if (canHandleTransferSyntax(transferSyntax)) {
                         if (hb <= 8) {
                             return 8;
                         } else if (hb <= 16) {
@@ -183,7 +175,7 @@ namespace imebra {
 #ifdef JPEG2000_V1
                     CODEC_FORMAT format = (CODEC_FORMAT)(CODEC_J2K);
 #else
-                    CODEC_FORMAT format = (CODEC_FORMAT)(OPJ_CODEC_J2K);
+                    CODEC_FORMAT format = (CODEC_FORMAT) (OPJ_CODEC_J2K);
 #endif
 
                     std::shared_ptr<memory> jpegMemory(std::make_shared<memory>());
@@ -236,12 +228,11 @@ namespace imebra {
                     opj_destroy_codec(dinfo);
 #endif
                     if (jp2image == nullptr) {
-                        IMEBRA_THROW(CodecCorruptedFileError, "Could not decode the jpeg2000 image");
+                        IMEBRA_THROW(CodecCorruptedFileError,  "JPEG2000 Decode Failed!");
                     }
 
 //    std::uint32_t width(sourceDataSet.getUint32(0x0028, 0, 0x0011, 0, 0, 0));
 //    std::uint32_t height(sourceDataSet.getUint32(0x0028, 0, 0x0010, 0, 0, 0));
-//
 //    std::string colorSpace(sourceDataSet.getString(0x0028, 0, 0x0004, 0, 0, ""));
 
 
@@ -321,20 +312,17 @@ namespace imebra {
             void jpeg2000ImageCodec::setImage(
                     std::shared_ptr<streamWriter> pDestStream,
                     std::shared_ptr<const image> pSourceImage,
-                    const std::string & ,
-                    imageQuality_t  ,
+                    const std::string &,
+                    imageQuality_t,
                     std::uint32_t allocatedBits,
-                    bool /*bSubSampledX*/,
-                    bool /*bSubSampledY*/,
-                    bool /*bInterleaved*/,
-                    bool  b2Complement ) const {
+                    bool,
+                    bool,
+                    bool,
+                    bool b2Complement) const {
                 IMEBRA_FUNCTION_START() ;
 
                     IMEBRA_THROW(DataSetUnknownTransferSyntaxError,
                                  "None of the codecs support the specified transfer syntax");
-
-
-
                     const uint32_t highBit = pSourceImage->getHighBit();
                     std::shared_ptr<handlers::readingDataHandlerNumericBase> dataReader = pSourceImage->getReadingDataHandler();
 
@@ -387,7 +375,6 @@ namespace imebra {
                     }
                     pDestStream->write(reinterpret_cast<const uint8_t *>(&rgbyteCompressed[0]),
                                        (uint32_t) cbyteCompressed);
-
 
 
                 IMEBRA_FUNCTION_END();

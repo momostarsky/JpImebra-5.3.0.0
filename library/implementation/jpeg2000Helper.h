@@ -5,9 +5,15 @@
 #ifndef IMEBRA_JPEG2000HELPER_H
 #define IMEBRA_JPEG2000HELPER_H
 
-#include "gdcmSwapper.h"
-#include <openjpeg-2.3/openjpeg.h>
+#include <byteswap.h>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+extern "C"
+{
+#include  <openjpeg-2.3/openjpeg.h>
 
+}
 #define  gdcmErrorMacro(msg) {}
 #define  gdcmWarningMacro(msg) {}
 #define  gdcmDebugMacro(msg){}
@@ -21,19 +27,109 @@ namespace imebra {
 
 
 
-            void opj_error_callback(const char */*msg*/, void */*usr*/) {
-                //Dicom::Debug::Log->Error("OpenJPEG: {0}", gcnew String(msg));
+                    void opj_error_callback(const char */*msg*/, void */*usr*/) {
+                        //Dicom::Debug::Log->Error("OpenJPEG: {0}", gcnew String(msg));
+                    }
+
+                    void opj_warning_callback(const char */*msg*/, void *) {
+                        //Dicom::Debug::Log->Warn("OpenJPEG: {0}", gcnew String(msg));
+                    }
+
+                    void opj_info_callback(const char */*msg*/, void *) {
+                        //Dicom::Debug::Log->Info("OpenJPEG: {0}", gcnew String(msg));
+                    }
+
             }
 
-            void opj_warning_callback(const char */*msg*/, void *) {
-                //Dicom::Debug::Log->Warn("OpenJPEG: {0}", gcnew String(msg));
+            class SwapperNoOp {
+            public:
+                template<typename T>
+                static T Swap(T val) { return val; }
+
+                template<typename T>
+                static void SwapArray(T *, size_t) {}
+            };
+
+            class SwapperDoOp {
+            public:
+                template<typename T>
+                static T Swap(T val);
+
+                template<typename T>
+                static void SwapArray(T *array, size_t n) {
+
+                    for (size_t i = 0; i < n; ++i) {
+                        array[i] = Swap<T>(array[i]);
+                    }
+                }
+            };
+
+            template<>
+            inline uint16_t SwapperDoOp::Swap<uint16_t>(uint16_t val) {
+                return bswap_16(val);
             }
 
-            void opj_info_callback(const char */*msg*/, void *) {
-                //Dicom::Debug::Log->Info("OpenJPEG: {0}", gcnew String(msg));
+            template<>
+            inline int16_t SwapperDoOp::Swap<int16_t>(int16_t val) {
+                return Swap((uint16_t) val);
             }
 
+            template<>
+            inline uint32_t SwapperDoOp::Swap<uint32_t>(uint32_t val) {
+                return bswap_32(val);
             }
+
+            template<>
+            inline int32_t SwapperDoOp::Swap<int32_t>(int32_t val) {
+                return Swap((uint32_t) val);
+            }
+
+            template<>
+            inline float SwapperDoOp::Swap<float>(float val) {
+                return static_cast<float>(Swap((uint32_t) val));
+            }
+
+            template<>
+            inline uint64_t SwapperDoOp::Swap<uint64_t>(uint64_t val) {
+                return bswap_64(val);
+            }
+
+            template<>
+            inline int64_t SwapperDoOp::Swap<int64_t>(int64_t val) {
+                return Swap((uint64_t) val);
+            }
+
+            template<>
+            inline double SwapperDoOp::Swap<double>(double val) {
+                return static_cast<double>(Swap((uint64_t) val));
+            }
+
+
+            template<>
+            inline void SwapperDoOp::SwapArray(uint8_t *, size_t) {}
+
+            template<>
+            inline void SwapperDoOp::SwapArray(float *array, size_t n) {
+                switch (sizeof(float)) {
+                    case 4:
+                        SwapperDoOp::SwapArray<uint32_t>((uint32_t *) array, n);
+                        break;
+                    default:
+                        assert(0);
+                }
+            }
+
+            template<>
+            inline void SwapperDoOp::SwapArray(double *array, size_t n) {
+                switch (sizeof(double)) {
+                    case 8:
+                        SwapperDoOp::SwapArray<uint64_t>((uint64_t *) array, n);
+                        break;
+                    default:
+                        assert(0);
+                }
+            }
+
 
 
 

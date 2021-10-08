@@ -147,7 +147,8 @@ int main(int argc, char* argv[])
                 "1.2.840.10008.1.2.5", // RLE compression
                 "1.2.840.10008.1.2.4.50", // Jpeg baseline (8 bits lossy)
                 "1.2.840.10008.1.2.4.51", // Jpeg extended (12 bits lossy)
-                "1.2.840.10008.1.2.4.57" // Jpeg lossless NH
+                "1.2.840.10008.1.2.4.57", // Jpeg lossless NH
+                "1.2.840.10008.1.2.4.90" // Jpeg2000
             };
 
             const std::uint32_t maxHighBitValues[]=
@@ -157,7 +158,8 @@ int main(int argc, char* argv[])
                 31,
                 7,
                 11,
-                15
+                15,
+                31,
             };
 
             std::istringstream convertTransferSyntax(argv[3]);
@@ -179,6 +181,7 @@ int main(int argc, char* argv[])
                     std::cout << "                          3 = Jpeg baseline (8 bits lossy)" << std::endl;
                     std::cout << "                          4 = Jpeg extended (12 bits lossy)" << std::endl;
                     std::cout << "                          5 = Jpeg lossless NH" << std::endl;
+                    std::cout << "                          6 = Jpeg2000" << std::endl;
                     return 1;
         }
 

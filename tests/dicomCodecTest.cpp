@@ -491,7 +491,7 @@ TEST(dicomCodecTest, testExternalStream)
                 }
             }
         }
-        catch(StreamEOFError)
+        catch(StreamEOFError&)
         {
         }
         EXPECT_EQ(1024u * 1024u, totalSize);
