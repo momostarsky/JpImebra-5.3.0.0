@@ -32,38 +32,146 @@ If you do not want to be bound by the GPL terms (such as the requirement
 #include <vector>
 #include <stdlib.h>
 #include <string.h>
-#include <iostream>
+#include <ostream>
 #include <cstdio>
-#include "jpeg2000Helper.h"
 
-extern "C"
-{
-#include  <openjpeg-2.3/openjpeg.h>
 
-}
 
 namespace imebra {
 
     namespace implementation {
 
         namespace codecs {
-            class JPEG2000Internals {
-            public:
-                JPEG2000Internals()
-                        : nNumberOfThreadsForDecompression(2) {
-                    memset(&coder_param, 0, sizeof(coder_param));
-                    opj_set_default_encoder_parameters(&coder_param);
-                    coder_param.cp_fixed_quality = 1;
-                    coder_param.cp_disto_alloc = 1;
+
+            extern  "C"
+            {
+                #include  <openjpeg-2.1/openjpeg.h>
+            }
+
+            typedef struct
+            {
+                OPJ_UINT8* pData; //Our data.
+                OPJ_SIZE_T dataSize; //How big is our data.
+                OPJ_SIZE_T offset; //Where are we currently in our data.
+            } opj_memory_stream;
+
+
+// Read from memory stream
+            static OPJ_SIZE_T opj_memory_stream_read(void * p_buffer, OPJ_SIZE_T p_nb_bytes, void * p_user_data)
+            {
+                opj_memory_stream* l_memory_stream = (opj_memory_stream*)p_user_data;//Our data.
+                OPJ_SIZE_T l_nb_bytes_read = p_nb_bytes;//Amount to move to buffer.
+
+                //Check if the current offset is outside our data buffer.
+                if (l_memory_stream->offset >= l_memory_stream->dataSize) return (OPJ_SIZE_T)-1;
+
+                //Check if we are reading more than we have.
+                if (p_nb_bytes > (l_memory_stream->dataSize - l_memory_stream->offset))
+                {
+                    l_nb_bytes_read = l_memory_stream->dataSize - l_memory_stream->offset;//Read all we have.
                 }
 
-                opj_cparameters coder_param;
-                int nNumberOfThreadsForDecompression;
-            };
+                //Copy the data to the internal buffer.
+                memcpy(p_buffer, &(l_memory_stream->pData[l_memory_stream->offset]), l_nb_bytes_read);
+                l_memory_stream->offset += l_nb_bytes_read;//Update the pointer to the new location.
+                return l_nb_bytes_read;
+            }
 
+//This will write from the buffer to our memory.
+            static OPJ_SIZE_T opj_memory_stream_write(void * p_buffer, OPJ_SIZE_T p_nb_bytes, void * p_user_data)
+            {
+                opj_memory_stream* l_memory_stream = (opj_memory_stream*)p_user_data;//Our data.
+                OPJ_SIZE_T l_nb_bytes_write = p_nb_bytes;//Amount to move to buffer.
 
+                //Check if the current offset is outside our data buffer.
+                if (l_memory_stream->offset >= l_memory_stream->dataSize) return (OPJ_SIZE_T)-1;
 
+                //Check if we are write more than we have space for.
+                if (p_nb_bytes > (l_memory_stream->dataSize - l_memory_stream->offset))
+                {
+                    l_nb_bytes_write = l_memory_stream->dataSize - l_memory_stream->offset;//Write the remaining space.
+                }
 
+                //Copy the data from the internal buffer.
+                memcpy(&(l_memory_stream->pData[l_memory_stream->offset]), p_buffer, l_nb_bytes_write);
+                l_memory_stream->offset += l_nb_bytes_write;//Update the pointer to the new location.
+                return l_nb_bytes_write;
+            }
+
+//Moves the pointer forward, but never more than we have.
+            static OPJ_OFF_T opj_memory_stream_skip(OPJ_OFF_T p_nb_bytes, void * p_user_data)
+            {
+                opj_memory_stream* l_memory_stream = (opj_memory_stream*)p_user_data;
+                OPJ_SIZE_T l_nb_bytes;
+
+                if (p_nb_bytes < 0) return -1;//No skipping backwards.
+                {
+                    l_nb_bytes = (OPJ_SIZE_T)p_nb_bytes;//Allowed because it is positive.
+                }
+
+                // Do not allow jumping past the end.
+                if (l_nb_bytes >l_memory_stream->dataSize - l_memory_stream->offset)
+                {
+                    l_nb_bytes = l_memory_stream->dataSize - l_memory_stream->offset;//Jump the max.
+                }
+
+                //Make the jump.
+                l_memory_stream->offset += l_nb_bytes;
+
+                //Returm how far we jumped.
+                return l_nb_bytes;
+            }
+
+//Sets the pointer to anywhere in the memory.
+            static OPJ_BOOL opj_memory_stream_seek(OPJ_OFF_T p_nb_bytes, void * p_user_data)
+            {
+                opj_memory_stream* l_memory_stream = (opj_memory_stream*)p_user_data;
+
+                if (p_nb_bytes < 0)
+                {
+                    return OPJ_FALSE;
+                }
+
+                if (p_nb_bytes >(OPJ_OFF_T)l_memory_stream->dataSize)
+                {
+                    return OPJ_FALSE;
+                }
+
+                l_memory_stream->offset = (OPJ_SIZE_T)p_nb_bytes;//Move to new position.
+                return OPJ_TRUE;
+            }
+
+//The system needs a routine to do when finished, the name tells you what I want it to do.
+            static void opj_memory_stream_do_nothing(void * /* p_user_data */)
+            {
+            }
+
+//Create a stream to use memory as the input or output.
+            opj_stream_t* opj_stream_create_default_memory_stream(opj_memory_stream* p_memoryStream, OPJ_BOOL p_is_read_stream)
+            {
+                opj_stream_t* l_stream;
+
+                if (!(l_stream = opj_stream_default_create(p_is_read_stream)))
+                {
+                    return (NULL);
+                }
+
+                //Set how to work with the frame buffer.
+                if(p_is_read_stream)
+                {
+                    opj_stream_set_read_function(l_stream, opj_memory_stream_read);
+                }
+                else
+                {
+                    opj_stream_set_write_function(l_stream, opj_memory_stream_write);
+                }
+
+                opj_stream_set_seek_function(l_stream, opj_memory_stream_seek);
+                opj_stream_set_skip_function(l_stream, opj_memory_stream_skip);
+                opj_stream_set_user_data(l_stream, p_memoryStream, opj_memory_stream_do_nothing);
+                opj_stream_set_user_data_length(l_stream, p_memoryStream->dataSize);
+                return l_stream;
+            }
 
 
 ////////////////////////////////////////////////////////////////
@@ -79,7 +187,15 @@ namespace imebra {
             bool jpeg2000ImageCodec::canHandleTransferSyntax(const std::string &transferSyntax) const {
                 IMEBRA_FUNCTION_START() ;
 
-                    return ( transferSyntax == "1.2.840.10008.1.2.4.90" ||   transferSyntax == "1.2.840.10008.1.2.4.91");
+
+                    return (
+                            transferSyntax == uidJPEG2000ImageCompression_1_2_840_10008_1_2_4_91
+                            || transferSyntax == uidJPEG2000ImageCompressionLosslessOnly_1_2_840_10008_1_2_4_90
+                            || transferSyntax ==
+                               uidJPEG2000Part2MulticomponentImageCompressionLosslessOnly_1_2_840_10008_1_2_4_92
+                            || transferSyntax == uidJPEG2000Part2MulticomponentImageCompression_1_2_840_10008_1_2_4_93
+
+                    );
 
                 IMEBRA_FUNCTION_END();
             }
@@ -90,11 +206,11 @@ namespace imebra {
             }
 
             jpeg2000ImageCodec::jpeg2000ImageCodec() {
-                Internals = new JPEG2000Internals;
+                jpeg2000Codec = new gdcm::JPEG2000Codec();
             }
 
             jpeg2000ImageCodec::~jpeg2000ImageCodec() {
-                delete Internals;
+                delete jpeg2000Codec;
             }
 
 
@@ -129,13 +245,13 @@ namespace imebra {
 //
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
-            std::uint32_t jpeg2000ImageCodec::suggestAllocatedBits(const std::string &transferSyntax  ,
-                                                                   std::uint32_t   highBit  ) const {
+            std::uint32_t jpeg2000ImageCodec::suggestAllocatedBits(const std::string &transferSyntax,
+                                                                   std::uint32_t highBit) const {
                 IMEBRA_FUNCTION_START() ;
 
 
                     std::uint32_t hb = highBit + 1;
-                    if (canHandleTransferSyntax(transferSyntax) ) {
+                    if (canHandleTransferSyntax(transferSyntax)) {
                         if (hb <= 8) {
                             return 8;
                         } else if (hb <= 16) {
@@ -174,81 +290,15 @@ namespace imebra {
                                                                 bool /*bSubsampledY*/,
                                                                 bool /*bInterleaved*/,
                                                                 bool b2Complement,
-                                                                std::uint8_t /*allocatedBits*/,
+                                                                std::uint8_t allocatedBits,
                                                                 std::uint8_t /*storedBits*/,
                                                                 std::uint8_t highBit,
                                                                 std::shared_ptr<streamReader> pStream) const {
                 IMEBRA_FUNCTION_START() ;
 
-#ifdef JPEG2000_V1
-                    CODEC_FORMAT format = (CODEC_FORMAT)(CODEC_J2K);
-#else
-                    CODEC_FORMAT format = (CODEC_FORMAT)(OPJ_CODEC_J2K);
-#endif
-
-                    std::shared_ptr<memory> jpegMemory(std::make_shared<memory>());
-                    {
-                        std::shared_ptr<memoryStreamOutput> memoryStream(
-                                std::make_shared<memoryStreamOutput>(jpegMemory));
-                        streamWriter memoryStreamWriter(memoryStream);
-                        unsigned char tempBuffer[4096];
-                        while (!pStream->endReached()) {
-                            size_t readLength = pStream->readSome(tempBuffer, sizeof(tempBuffer));
-                            memoryStreamWriter.write(tempBuffer, readLength);
-                        }
-                    }
-
-                    opj_dparameters_t parameters;
-                    opj_set_default_decoder_parameters(&parameters);
-#ifdef JPEG2000_V1
-                    opj_dinfo_t *dinfo;
-#else
-                    opj_codec_t *dinfo;
-#endif
-
-                    dinfo = opj_create_decompress(format);
-                    opj_setup_decoder(dinfo, &parameters);
-                    opj_image_t *jp2image(nullptr);
-
-#ifdef JPEG2000_V1
-                    opj_cio_t* cio = opj_cio_open((opj_common_ptr)dinfo, jpegMemory->data(), (int)jpegMemory->size());
-                    if(cio != 0)
-                    {
-                        jp2image = opj_decode(dinfo, cio);
-                        opj_cio_close(cio);
-                    }
-#else
-                    opj_memory_stream memoryStream;
-                    memoryStream.pData = jpegMemory->data();
-                    memoryStream.dataSize = jpegMemory->size();
-                    memoryStream.offset = 0;
-
-                    opj_stream_t *pJpeg2000Stream = opj_stream_create_default_memory_stream(&memoryStream, true);
-                    if (pJpeg2000Stream != nullptr) {
-                        if (opj_read_header(pJpeg2000Stream, dinfo, &jp2image)) {
-                            if (!opj_decode(dinfo, pJpeg2000Stream, jp2image)) {
-                                opj_image_destroy(jp2image);
-                                jp2image = nullptr;
-                            }
-                        }
-                        opj_stream_destroy(pJpeg2000Stream);
-                    }
-                    opj_destroy_codec(dinfo);
-#endif
-                    if (jp2image == nullptr) {
-                        IMEBRA_THROW(CodecCorruptedFileError, "Could not decode the jpeg2000 image");
-                    }
-
-//    std::uint32_t width(sourceDataSet.getUint32(0x0028, 0, 0x0011, 0, 0, 0));
-//    std::uint32_t height(sourceDataSet.getUint32(0x0028, 0, 0x0010, 0, 0, 0));
-//
-//    std::string colorSpace(sourceDataSet.getString(0x0028, 0, 0x0004, 0, 0, ""));
 
 
-                    std::uint32_t width(imageWidth);
-                    std::uint32_t height(imageHeight);
 
-                    std::string colorSpace(imageColorSpace);
 
                     bitDepth_t depth;
                     if (b2Complement) {
@@ -270,6 +320,71 @@ namespace imebra {
                     }
 
 
+
+                    CODEC_FORMAT format = (CODEC_FORMAT)(OPJ_CODEC_J2K);
+
+                    std::shared_ptr<memory> jpegMemory(std::make_shared<memory>());
+                    {
+                        std::shared_ptr<memoryStreamOutput> memoryStream(std::make_shared<memoryStreamOutput>(jpegMemory));
+                        streamWriter memoryStreamWriter(memoryStream);
+                        unsigned char tempBuffer[4096];
+                        while(!pStream->endReached())
+                        {
+                            size_t readLength = pStream->readSome(tempBuffer, sizeof(tempBuffer));
+                            memoryStreamWriter.write(tempBuffer, readLength);
+                        }
+                    }
+
+                    opj_dparameters_t parameters;
+                    opj_set_default_decoder_parameters(&parameters);
+#ifdef JPEG2000_V1
+                    opj_dinfo_t *dinfo;
+#else
+                    opj_codec_t *dinfo;
+#endif
+
+                    dinfo = opj_create_decompress(format);
+                    opj_setup_decoder(dinfo, &parameters);
+                    opj_image_t* jp2image(0);
+
+#ifdef JPEG2000_V1
+                    opj_cio_t* cio = opj_cio_open((opj_common_ptr)dinfo, jpegMemory->data(), (int)jpegMemory->size());
+    if(cio != 0)
+    {
+        jp2image = opj_decode(dinfo, cio);
+        opj_cio_close(cio);
+    }
+#else
+                    opj_memory_stream memoryStream;
+                    memoryStream.pData = jpegMemory->data();
+                    memoryStream.dataSize = jpegMemory->size();
+                    memoryStream.offset = 0;
+
+                    opj_stream_t* pJpeg2000Stream = opj_stream_create_default_memory_stream(&memoryStream, true);
+                    if(pJpeg2000Stream != 0)
+                    {
+                        if(opj_read_header(pJpeg2000Stream, dinfo, &jp2image))
+                        {
+                            if(!opj_decode(dinfo, pJpeg2000Stream, jp2image))
+                            {
+                                opj_image_destroy(jp2image);
+                                jp2image = 0;
+                            }
+                        }
+                        opj_stream_destroy(pJpeg2000Stream);
+                    }
+                    opj_destroy_codec(dinfo);
+#endif
+                    if(jp2image == 0)
+                    {
+                        IMEBRA_THROW(CodecCorruptedFileError, "Could not decode the jpeg2000 image");
+                    }
+
+                    std::uint32_t width(imageWidth);
+                    std::uint32_t height(imageHeight);
+
+                    std::string colorSpace(imageColorSpace);
+
                     std::shared_ptr<image> returnImage(
                             std::make_shared<image>(
                                     width,
@@ -278,14 +393,14 @@ namespace imebra {
                                     colorSpace,
                                     highBit));
 
-                    std::shared_ptr<handlers::writingDataHandlerNumericBase> imageHandler(
-                            returnImage->getWritingDataHandler());
+                    std::shared_ptr<handlers::writingDataHandlerNumericBase> imageHandler(returnImage->getWritingDataHandler());
 
                     ::memset(imageHandler->getMemory()->data(), 0, imageHandler->getSize());
 
                     // Copy channels
-                    for (unsigned int channelNumber(0); channelNumber != jp2image->numcomps; ++channelNumber) {
-                        const opj_image_comp_t &channelData = jp2image->comps[channelNumber];
+                    for(unsigned int channelNumber(0); channelNumber != jp2image->numcomps; ++channelNumber)
+                    {
+                        const opj_image_comp_t& channelData = jp2image->comps[channelNumber];
 
                         imageHandler->copyFromInt32Interleaved(channelData.data,
                                                                channelData.dx,
@@ -305,6 +420,7 @@ namespace imebra {
                     return returnImage;
 
 
+
                 IMEBRA_FUNCTION_END();
             }
 
@@ -321,19 +437,14 @@ namespace imebra {
             void jpeg2000ImageCodec::setImage(
                     std::shared_ptr<streamWriter> pDestStream,
                     std::shared_ptr<const image> pSourceImage,
-                    const std::string & ,
-                    imageQuality_t  ,
+                    const std::string &,
+                    imageQuality_t,
                     std::uint32_t allocatedBits,
                     bool /*bSubSampledX*/,
                     bool /*bSubSampledY*/,
                     bool /*bInterleaved*/,
-                    bool  b2Complement ) const {
+                    bool b2Complement) const {
                 IMEBRA_FUNCTION_START() ;
-
-                    IMEBRA_THROW(DataSetUnknownTransferSyntaxError,
-                                 "None of the codecs support the specified transfer syntax");
-
-
 
                     const uint32_t highBit = pSourceImage->getHighBit();
                     std::shared_ptr<handlers::readingDataHandlerNumericBase> dataReader = pSourceImage->getReadingDataHandler();
@@ -345,41 +456,13 @@ namespace imebra {
                     pSourceImage->getSize(&image_width, &image_height);
 
                     std::string colorSpace = pSourceImage->getColorSpace();
-                    uint32_t sample_pixel = pSourceImage->getChannelsNumber();
-                    uint32_t bitsallocated = allocatedBits;
-
-                    // Most significant bit for pixel sample data. Each sample shall have the same high bit.
-                    // High Bit (0028,0102) shall be one less than Bits Stored (0028,0101).
-                    // See PS3.5 for further explanation.
-                    uint32_t bitsstored = highBit + 1;// this ->suggestAllocatedBits(transferSyntax, highBit) ;
-                    // bool b2Complement(getUint32(0x0028, 0x0, 0x0103, 0, 0, 0) != 0);
-                    int pixelRepresentation = 0;
-                    if (b2Complement) {
-                        pixelRepresentation = 1;
-                    } else {
-                        pixelRepresentation = 0;
-                    }
-
-                    int pcx = 0;
-                    if (pSourceImage->getColorSpace() == "PALETTE COLOR") {
-                        pcx = 1;
-                    }
 
 
                     std::vector<char> rgbyteCompressed;
                     rgbyteCompressed.resize(image_width * image_height * 4);
                     size_t cbyteCompressed;
-                    bool b = codeFrameIntoBuffer((char *) &rgbyteCompressed[0], rgbyteCompressed.size(),
-                                                 cbyteCompressed, reinterpret_cast<const char *>(buffer), sz,
-                                                 static_cast<int>(image_width),
-                                                 static_cast<int>(image_height),
-                                                 static_cast<int>(sample_pixel),
-                                                 static_cast<int>(bitsallocated),
-                                                 static_cast<int>(bitsstored),
-                                                 (int) highBit,
-                                                 pixelRepresentation,
-                                                 Internals->coder_param,
-                                                 pcx
+                    bool b =jpeg2000Codec->CodeFrameIntoBuffer((char *) &rgbyteCompressed[0], rgbyteCompressed.size(),
+                                                 cbyteCompressed, reinterpret_cast<const char *>(buffer), sz
                     );
                     if (!b) {
                         IMEBRA_THROW(DataSetUnknownTransferSyntaxError,
@@ -387,7 +470,6 @@ namespace imebra {
                     }
                     pDestStream->write(reinterpret_cast<const uint8_t *>(&rgbyteCompressed[0]),
                                        (uint32_t) cbyteCompressed);
-
 
 
                 IMEBRA_FUNCTION_END();

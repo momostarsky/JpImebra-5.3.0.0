@@ -25,7 +25,7 @@ If you do not want to be bound by the GPL terms (such as the requirement
 #include "jpegCodecBaseImpl.h"
 #include <map>
 #include <list>
-
+#include "gdcmJPEG2000Codec.h"
 
 namespace imebra {
 
@@ -36,7 +36,7 @@ namespace imebra {
 /// \addtogroup group_codecs
 ///
 /// @{
-            class JPEG2000Internals;
+
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
@@ -105,7 +105,7 @@ namespace imebra {
             private:
 
 
-                JPEG2000Internals *Internals;
+                gdcm::JPEG2000Codec *jpeg2000Codec;
             };
 
 
